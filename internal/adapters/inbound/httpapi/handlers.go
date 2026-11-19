@@ -101,3 +101,13 @@ func (h *handler) deleteUser(c *gin.Context) {
 	}
 	c.Status(http.StatusNoContent)
 }
+
+func (h *handler) getMe(c *gin.Context) {
+	userID := c.GetString(userIDKey)
+	user, err := h.users.Get(c.Request.Context(), userID)
+	if err != nil {
+		writeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, toUserResponse(user))
+}

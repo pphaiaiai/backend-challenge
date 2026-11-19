@@ -62,6 +62,7 @@ func NewRouter(users UserService, auth AuthService, logger *slog.Logger) *gin.En
 	protected.GET("/:id", h.getUser)
 	protected.PATCH("/:id", h.updateUser)
 	protected.DELETE("/:id", h.deleteUser)
+	protected.GET("/me", h.getMe)
 
 	return r
 }

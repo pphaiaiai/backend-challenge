@@ -260,3 +260,27 @@ func TestDeleteUser(t *testing.T) {
 
 	assertError(t, srv.do(http.MethodDelete, "/api/v1/users/other", "", validToken), http.StatusNotFound, "not_found")
 }
+
+func TestGetMe(t *testing.T) {
+	var gotID string
+	users := &stubUserService{get: func(_ context.Context, id string) (*domain.User, error) {
+		gotID = id
+		return alice, nil
+	}}
+	srv := newServer(t, users, nil)
+
+	rec := srv.do(http.MethodGet, "/api/v1/users/me", "", validToken)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d; body: %s", rec.Code, rec.Body)
+	}
+	if gotID != "user-1" {
+		t.Errorf("service was asked for %q, want the authenticated user %q", gotID, "user-1")
+	}
+
+	assertError(t, srv.do(http.MethodGet, "/api/v1/users/me", "", ""), http.StatusUnauthorized, "unauthorized")
+
+	// /:id must still work next to the static /me route.
+	if rec := srv.do(http.MethodGet, "/api/v1/users/abc", "", validToken); gotID != "abc" || rec.Code != http.StatusOK {
+		t.Errorf("GET /users/abc: status %d, service got %q", rec.Code, gotID)
+	}
+}
