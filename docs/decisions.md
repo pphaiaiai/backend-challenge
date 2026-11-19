@@ -1,7 +1,6 @@
 # Design Decisions and Assumptions
 
 Each entry records what was decided, why, and what it costs.
-Entries are added as the project grows.
 
 ## 1. Architecture
 
