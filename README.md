@@ -1,162 +1,254 @@
-# Backend Golang Coding Test
+# User Management API
 
-## Overview
+A Go service for managing users. It exposes a REST API (Gin) and a gRPC API,
+stores users in MongoDB, authenticates with JWT (HS256), and is structured as
+a hexagonal (ports and adapters) application.
 
-This coding test has two parts.
+Part 2 of the challenge, the **Lottery Search System**, is a design proposal:
+[docs/lottery-search-design.md](docs/lottery-search-design.md).
 
-| Section | Focus | Submission Type |
-| --- | --- | --- |
-| User Management API | Build a Golang user management API with MongoDB and JWT authentication | Code implementation |
-| Lottery Search System | Design a real-world lottery ticket search solution with wildcard matching | Design proposal only (no code) |
-
-## User Management API
-
-### Objective (User Management API)
-
-Build a RESTful API in Golang to manage users, using MongoDB for persistence, JWT for authentication, and clean code practices.
-
-### Requirements (User Management API)
-
-#### 1. User Model
-
-Define a user entity with the following fields:
-
-- `ID` (auto-generated)
-- `Name` (string)
-- `Email` (string, unique)
-- `Password` (hashed)
-- `CreatedAt` (timestamp)
-
-#### 2. Authentication
-
-Implement:
-
-- User registration
-- User authentication that returns a JWT token
-
-JWT requirements:
-
-- Protect endpoints with JWT
-- Validate tokens via middleware
-- Sign tokens using HMAC (`HS256`) with a secret key
-
-#### 3. User Operations
-
-Implement the following operations:
-
-- Create a new user
-- Fetch a user by ID
-- List all users
-- Update a user's name or email
-- Delete a user
-
-#### 4. MongoDB Integration
-
-- Use the official Go MongoDB driver
-- Persist and retrieve user data from MongoDB
-
-#### 5. Middleware
-
-- Implement logging middleware to capture HTTP method, path, and execution time
-
-#### 6. Concurrency Task
-
-- Run a background goroutine every 10 seconds to log the total number of users in the database
-
-#### 7. Testing
-
-- Write unit tests using Go's standard `testing` package
-- Mock MongoDB interactions where appropriate
-
-### Bonus (Optional, User Management API)
-
-- **Containerization**: Add Docker and `docker-compose` support for the API and MongoDB
-- **Abstraction**: Use Go interfaces to abstract MongoDB operations for better testability
-- **Validation**: Implement input validation (for example, required fields and email format)
-- **Graceful Shutdown**: Handle system signals using `context.Context`
-- **gRPC Support**:
-  - Define a `.proto` file for `CreateUser` and `GetUser`
-  - Implement a gRPC server (optionally secure with token metadata)
-- **Hexagonal Architecture**:
-  - Structure the project using ports and adapters
-  - Separate domain, application, and infrastructure layers
-  - Decouple business logic from frameworks and drivers
-
-### Deliverables (User Management API)
-
-Provide a Git repository containing:
-
-- `README.md` with setup and execution instructions
-- A guide explaining how to generate and use JWT tokens
-- Sample API requests and responses
-- Documentation of assumptions or design decisions
-
-### Evaluation Criteria (User Management API)
-
-- Code quality, structure, and readability
-- Correctness and completeness of the REST API
-- Security and implementation of JWT
-- Proper usage and abstraction of MongoDB
-- Test coverage and effective mocking
-- Idiomatic Go usage
-- Bonus implementations (gRPC, Docker, validation, architecture)
-
-## Lottery Search System
-
-### Objective (Lottery Search System)
-
-Design a real-world solution to search a large dataset of lottery tickets using pattern matching with wildcard support.
-
-> This section is a design exercise. Do not implement code.
-
-### Requirements (Lottery Search System)
-
-#### 1. Data Volume
-
-- Handle a dataset of **10 million** lottery tickets
-- Each ticket is a 6-digit number
-
-#### 2. Search Pattern
-
-- Support a 6-character search pattern containing digits and wildcards (`*`)
-- Example patterns:
-
-| Pattern | Matches |
+| Document | Contents |
 | --- | --- |
-| `****23` | Numbers ending in `23` |
-| `1****5` | Numbers starting with `1` and ending with `5` |
-| `123***` | Numbers starting with `123` |
+| [docs/api.md](docs/api.md) | Sample requests and responses for every REST and gRPC endpoint |
+| [docs/authentication.md](docs/authentication.md) | How to get and use JWT tokens |
+| [docs/decisions.md](docs/decisions.md) | Design decisions and assumptions, with their trade-offs |
+| [docs/lottery-search-design.md](docs/lottery-search-design.md) | Part 2: lottery ticket search and allocation design |
+| [docs/postman_collection.json](docs/postman_collection.json) | Postman collection with tests for every REST endpoint |
+| [docs/challenge.md](docs/challenge.md) | The original challenge description |
 
-#### 3. Result Distribution
+## Contents
 
-- Constraint: the same search pattern should not return the same ticket to multiple users at the same time
-- Propose a distribution mechanism so matching tickets are assigned without duplicate simultaneous selection
+- [Requirements coverage](#requirements-coverage)
+- [Quick start with Docker](#quick-start-with-docker)
+- [Running without Docker](#running-without-docker)
+- [Configuration](#configuration)
+- [API overview](#api-overview)
+- [Authentication](#authentication)
+- [Project structure](#project-structure)
+- [Testing](#testing)
+- [Make targets](#make-targets)
+- [Development notes](#development-notes)
 
-#### 4. Performance
+## Requirements coverage
 
-- Ensure the search is performant for `10M+` records
-- Propose an efficient approach for querying and allocation
+| Requirement | Where |
+| --- | --- |
+| User model (ID, name, unique email, hashed password, created at) | [`internal/domain/user.go`](internal/domain/user.go); unique index in [`mongodb/user_repository.go`](internal/adapters/outbound/mongodb/user_repository.go) |
+| Registration and login returning a JWT | `POST /api/v1/auth/register`, `POST /api/v1/auth/login` |
+| JWT signed with HS256, validated by middleware | [`outbound/token/jwt.go`](internal/adapters/outbound/token/jwt.go), `RequireAuth` in [`httpapi/middleware.go`](internal/adapters/inbound/httpapi/middleware.go) |
+| Create, get, list, update (name/email) and delete users | `/api/v1/users` endpoints, [`application/user_service.go`](internal/application/user_service.go) |
+| Official MongoDB Go driver | `go.mongodb.org/mongo-driver/v2`, [`outbound/mongodb`](internal/adapters/outbound/mongodb) |
+| Logging middleware (method, path, duration) | `RequestLogger` in [`httpapi/middleware.go`](internal/adapters/inbound/httpapi/middleware.go) |
+| Goroutine logging the user count every 10 seconds | [`inbound/worker/user_count.go`](internal/adapters/inbound/worker/user_count.go) |
+| Unit tests with the `testing` package, MongoDB mocked | `*_test.go` in every package; the repository is faked in [`application/fakes_test.go`](internal/application/fakes_test.go) |
+| **Bonus:** Docker and docker-compose | [`Dockerfile`](Dockerfile), [`docker-compose.yml`](docker-compose.yml) |
+| **Bonus:** interfaces abstracting MongoDB | [`application/ports.go`](internal/application/ports.go) |
+| **Bonus:** input validation | Gin binding tags and [`domain/validation.go`](internal/domain/validation.go) |
+| **Bonus:** graceful shutdown with `context.Context` | [`cmd/api/main.go`](cmd/api/main.go) |
+| **Bonus:** gRPC `CreateUser` and `GetUser`, secured with token metadata | [`proto/user/v1/user.proto`](proto/user/v1/user.proto), [`inbound/grpcapi`](internal/adapters/inbound/grpcapi) |
+| **Bonus:** hexagonal architecture | See [Project structure](#project-structure) |
 
-#### 5. Real-World Design Proposal (No Code Required)
+## Quick start with Docker
 
-- Recommend the database/storage technology you would use in production and explain why
-- Describe the algorithm and indexing strategy used for wildcard pattern matching
-- Explain how you would prevent duplicate simultaneous results for the same pattern (for example, locking, reservation, or atomic allocation)
-- No code implementation is required; provide a solution/design only
+Requires Docker with Compose v2.
 
-### Deliverables (Lottery Search System)
+```bash
+cp .env.example .env
+# Set JWT_SECRET in .env, for example to the output of: openssl rand -base64 48
+make up        # same as: docker compose up --build -d
+make logs      # follow the API logs
+```
 
-Submit a design document only (no code implementation) that includes:
+The REST API listens on `http://localhost:8080` and gRPC on `localhost:9090`.
+Try it:
 
-- Proposed solution architecture, data structures, and algorithms
-- Recommended production database/storage choice with justification (for example, query performance, concurrency handling, operational simplicity)
-- Performance analysis summarizing efficiency and tradeoffs
-- Concurrency/distribution strategy explaining how duplicate results are avoided for the same pattern
+```bash
+curl -s localhost:8080/api/v1/auth/register -H 'Content-Type: application/json' \
+  -d '{"name":"Alice","email":"alice@example.com","password":"password123"}'
 
-### Evaluation Criteria (Lottery Search System)
+TOKEN=$(curl -s localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' \
+  -d '{"email":"alice@example.com","password":"password123"}' | jq -r .access_token)
 
-- Feasibility: the solution addresses the stated requirements
-- Performance: the search approach is efficient for the target scale
-- Correctness: the distribution constraint is handled correctly
-- Real-world practicality: the database/storage and concurrency approach are appropriate for production use
-- Creativity: thoughtful use of data structures and algorithms
+curl -s localhost:8080/api/v1/users -H "Authorization: Bearer $TOKEN"
+```
+
+Every 10 seconds the logs show a `user count` line. Stop everything with
+`make down`; MongoDB data is kept in a Docker volume.
+
+## Running without Docker
+
+Requires Go 1.26 or later and a MongoDB server (for example
+`docker run -d -p 27017:27017 mongo:8`).
+
+```bash
+cp .env.example .env   # set JWT_SECRET
+make run               # loads .env and runs ./cmd/api
+```
+
+## Configuration
+
+All settings are environment variables. `make run` and Docker Compose read
+them from `.env`; see [`.env.example`](.env.example).
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `JWT_SECRET` | none, **required** | HMAC key for signing tokens, at least 32 bytes |
+| `JWT_TTL` | `1h` | Token lifetime |
+| `JWT_ISSUER` | `backend-challenge` | `iss` claim written and checked |
+| `HTTP_ADDR` | `:8080` | REST listen address |
+| `GRPC_ADDR` | `:9090` | gRPC listen address |
+| `GRPC_REFLECTION` | `true` | Enable gRPC server reflection (for grpcurl and Postman) |
+| `MONGO_URI` | `mongodb://localhost:27017` | MongoDB connection string |
+| `MONGO_DATABASE` | `user_management` | Database name |
+| `MONGO_TIMEOUT` | `5s` | Timeout for each database operation |
+| `BCRYPT_COST` | `10` | bcrypt work factor |
+| `USER_COUNT_INTERVAL` | `10s` | How often the user count is logged |
+| `SHUTDOWN_TIMEOUT` | `10s` | Time allowed for in-flight requests on shutdown |
+| `GIN_MODE` | `debug` | Set to `release` to silence Gin's debug output |
+
+Invalid values stop the service at start-up with a message listing every
+problem.
+
+## API overview
+
+REST (`http://localhost:8080`):
+
+| Method | Path | Auth | Description |
+| --- | --- | --- | --- |
+| GET | `/healthz` | – | Liveness check |
+| POST | `/api/v1/auth/register` | – | Register a user |
+| POST | `/api/v1/auth/login` | – | Get an access token |
+| POST | `/api/v1/users` | Bearer | Create a user |
+| GET | `/api/v1/users?offset=&limit=` | Bearer | List users (default 20, maximum 100 per page) |
+| GET | `/api/v1/users/me` | Bearer | Get the authenticated user |
+| GET | `/api/v1/users/{id}` | Bearer | Get a user |
+| PATCH | `/api/v1/users/{id}` | Bearer | Update name and/or email |
+| DELETE | `/api/v1/users/{id}` | Bearer | Delete a user |
+
+gRPC (`localhost:9090`, service `user.v1.UserService`): `CreateUser` and
+`GetUser`, both requiring the metadata `authorization: Bearer <token>`.
+
+```bash
+grpcurl -plaintext -H "authorization: Bearer $TOKEN" \
+  -d '{"id":"<user id>"}' localhost:9090 user.v1.UserService/GetUser
+```
+
+Errors share one JSON shape with a stable `code`, for example
+`{"error": {"code": "not_found", "message": "user not found"}}`.
+
+Full examples of every request, response and error:
+[docs/api.md](docs/api.md). To try the API in Postman, import
+[docs/postman_collection.json](docs/postman_collection.json) and choose
+**Run collection**.
+
+## Authentication
+
+1. Register with `POST /api/v1/auth/register`.
+2. Log in with `POST /api/v1/auth/login` and read `access_token` from the
+   response.
+3. Send it as `Authorization: Bearer <token>` (REST) or as the
+   `authorization` metadata entry (gRPC).
+
+Tokens are HS256-signed JWTs carrying the user ID (`sub`), issuer (`iss`),
+issue time (`iat`) and expiry (`exp`, 1 hour by default). The guide in
+[docs/authentication.md](docs/authentication.md) covers token contents,
+errors, configuration and security notes.
+
+## Project structure
+
+```text
+cmd/api/                     composition root: wiring, servers, graceful shutdown
+internal/
+  domain/                    entity, business rules, domain errors (standard library only)
+  application/               use cases (UserService, AuthService) and the ports they need
+  adapters/
+    inbound/                 drive the application
+      httpapi/               REST API (Gin): routes, handlers, middleware
+      grpcapi/               gRPC server and interceptors
+      worker/                background user-count job
+    outbound/                are driven by the application
+      mongodb/               UserRepository on MongoDB
+      password/              PasswordHasher with bcrypt
+      token/                 TokenService with HS256 JWT
+  config/                    environment configuration
+proto/user/v1/               gRPC contract
+gen/user/v1/                 generated gRPC code (make proto)
+docs/                        documentation
+```
+
+```mermaid
+flowchart LR
+    subgraph inbound [Inbound adapters]
+        HTTP[REST / Gin]
+        GRPC[gRPC]
+        WORKER[User count worker]
+    end
+    subgraph core [Application core]
+        APP[Use cases<br/>UserService, AuthService]
+        DOMAIN[Domain<br/>User, rules, errors]
+        APP --> DOMAIN
+    end
+    subgraph outbound [Outbound adapters]
+        MONGO[MongoDB repository]
+        BCRYPT[bcrypt hasher]
+        JWT[JWT service]
+    end
+    HTTP --> APP
+    GRPC --> APP
+    WORKER --> APP
+    APP -- "ports (interfaces)" --> MONGO
+    APP -- "ports (interfaces)" --> BCRYPT
+    APP -- "ports (interfaces)" --> JWT
+```
+
+The dependency rule: `domain` imports nothing outside the standard library,
+`application` imports only `domain`, and only adapters import frameworks and
+drivers (Gin, gRPC, the MongoDB driver, bcrypt, JWT). The application
+declares the interfaces it needs in
+[`application/ports.go`](internal/application/ports.go); adapters satisfy
+them, and [`cmd/api/main.go`](cmd/api/main.go) plugs them together. Because
+of this, REST and gRPC share the same use cases, and the use cases are tested
+without a database.
+
+## Testing
+
+```bash
+make test              # unit tests
+make test-race         # unit tests with the race detector
+make cover             # tests with total coverage
+
+# MongoDB integration tests: need a running MongoDB, for example from `make up`
+MONGO_URI=mongodb://localhost:27017 make test-integration
+```
+
+| Layer | What the tests cover |
+| --- | --- |
+| Domain | Validation and normalization rules |
+| Application | Every use case against hand-written fakes of `UserRepository`, `PasswordHasher` and `TokenService` |
+| REST | Handlers, status codes, error bodies, auth middleware, logging, panic recovery and body limits, via `httptest` |
+| gRPC | Both RPCs, error codes, authentication and recovery, over an in-memory `bufconn` connection |
+| Worker | Ticks, error logging and clean shutdown |
+| JWT and bcrypt | Real libraries, including rejected tokens: tampered payload, `alg: none`, HS512, wrong secret, expired |
+| MongoDB | Document mapping (unit), plus CRUD, unique email and pagination against a real MongoDB (integration, `-tags=integration`) |
+
+MongoDB is mocked at the `UserRepository` port rather than at the driver;
+[decision D20](docs/decisions.md#7-testing-strategy) explains why.
+
+## Make targets
+
+```text
+make help              list all targets
+make run               run locally, loading .env
+make build             build bin/api
+make up / down / logs  Docker Compose
+make test / test-race / test-integration / cover
+make vet / fmt
+make proto             regenerate gRPC code (needs protoc; plugins via `make tools`)
+```
+
+## Development notes
+
+This project was built with AI assistance (Claude) for scaffolding,
+implementation and review. I made the design decisions, and reviewed and
+tested all code. The reasoning behind each decision is recorded in
+[docs/decisions.md](docs/decisions.md).

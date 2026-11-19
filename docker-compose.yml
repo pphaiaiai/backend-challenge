@@ -1,0 +1,35 @@
+services:
+  mongo:
+    image: mongo:8
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:27018:27017" # for local tools and integration tests only
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      mongo:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "9090:9090"
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DATABASE: user_management
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      JWT_TTL: ${JWT_TTL:-1h}
+      GIN_MODE: release
+    # Longer than SHUTDOWN_TIMEOUT, so in-flight requests finish before SIGKILL.
+    stop_grace_period: 15s
+
+volumes:
+  mongo-data:

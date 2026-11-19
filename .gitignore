@@ -1,0 +1,14 @@
+# Build output
+/bin/
+
+# Test and coverage output
+coverage.out
+coverage.html
+
+# Local environment (copy .env.example to .env)
+.env
+
+# Editors and OS files
+.idea/
+.vscode/
+.DS_Store
