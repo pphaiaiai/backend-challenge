@@ -20,6 +20,8 @@ func TestLoad_Defaults(t *testing.T) {
 
 	want := config.Config{
 		HTTPAddr:          ":8080",
+		GRPCAddr:          ":9090",
+		GRPCReflection:    true,
 		ShutdownTimeout:   10 * time.Second,
 		MongoURI:          "mongodb://localhost:27017",
 		MongoDatabase:     "user_management",
@@ -43,25 +45,28 @@ func TestLoad_Overrides(t *testing.T) {
 		"JWT_TTL":             "15m",
 		"BCRYPT_COST":         "12",
 		"USER_COUNT_INTERVAL": "1s",
+		"GRPC_REFLECTION":     "false",
 	}))
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.HTTPAddr != ":9000" || cfg.MongoURI != "mongodb://mongo:27017" ||
-		cfg.JWTTTL != 15*time.Minute || cfg.BcryptCost != 12 || cfg.UserCountInterval != time.Second {
+		cfg.JWTTTL != 15*time.Minute || cfg.BcryptCost != 12 || cfg.UserCountInterval != time.Second ||
+		cfg.GRPCReflection {
 		t.Errorf("overrides not applied: %+v", cfg)
 	}
 }
 
 func TestLoad_Errors(t *testing.T) {
 	_, err := config.Load(env(map[string]string{
-		"JWT_TTL":     "forever",
-		"BCRYPT_COST": "high",
+		"JWT_TTL":         "forever",
+		"BCRYPT_COST":     "high",
+		"GRPC_REFLECTION": "maybe",
 	}))
 	if err == nil {
 		t.Fatal("expected an error")
 	}
-	for _, want := range []string{"JWT_SECRET", "JWT_TTL", "BCRYPT_COST"} {
+	for _, want := range []string{"JWT_SECRET", "JWT_TTL", "BCRYPT_COST", "GRPC_REFLECTION"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %s", err, want)
 		}

@@ -11,6 +11,8 @@ import (
 // Config holds all service settings.
 type Config struct {
 	HTTPAddr        string
+	GRPCAddr        string
+	GRPCReflection  bool
 	ShutdownTimeout time.Duration
 
 	MongoURI      string
@@ -31,6 +33,8 @@ func Load(getenv func(string) string) (Config, error) {
 	l := loader{getenv: getenv}
 	cfg := Config{
 		HTTPAddr:        l.string("HTTP_ADDR", ":8080"),
+		GRPCAddr:        l.string("GRPC_ADDR", ":9090"),
+		GRPCReflection:  l.bool("GRPC_REFLECTION", true),
 		ShutdownTimeout: l.duration("SHUTDOWN_TIMEOUT", 10*time.Second),
 
 		MongoURI:      l.string("MONGO_URI", "mongodb://localhost:27017"),
@@ -76,6 +80,19 @@ func (l *loader) duration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func (l *loader) bool(key string, def bool) bool {
+	v := l.getenv(key)
+	if v == "" {
+		return def
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		l.errs = append(l.errs, fmt.Errorf("%s must be true or false, got %q", key, v))
+		return def
+	}
+	return b
 }
 
 func (l *loader) int(key string, def int) int {

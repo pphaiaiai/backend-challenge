@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -14,6 +15,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/pphaiaiai/backend-challenge/internal/adapters/inbound/grpcapi"
 	"github.com/pphaiaiai/backend-challenge/internal/adapters/inbound/httpapi"
 	"github.com/pphaiaiai/backend-challenge/internal/adapters/inbound/worker"
 	"github.com/pphaiaiai/backend-challenge/internal/adapters/outbound/mongodb"
@@ -83,6 +85,11 @@ func run(logger *slog.Logger) error {
 		WriteTimeout:      15 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
+	grpcServer := grpcapi.NewServer(users, auth, logger, cfg.GRPCReflection)
+	grpcListener, err := net.Listen("tcp", cfg.GRPCAddr)
+	if err != nil {
+		return fmt.Errorf("grpc listen: %w", err)
+	}
 	reporter := worker.NewUserCountReporter(users, cfg.UserCountInterval, logger)
 
 	// If any component fails, gctx is cancelled and the others shut down too.
@@ -92,6 +99,14 @@ func run(logger *slog.Logger) error {
 		logger.Info("http server listening", "addr", cfg.HTTPAddr)
 		if err := httpServer.ListenAndServe(); !errors.Is(err, http.ErrServerClosed) {
 			return fmt.Errorf("http server: %w", err)
+		}
+		return nil
+	})
+
+	g.Go(func() error {
+		logger.Info("grpc server listening", "addr", cfg.GRPCAddr)
+		if err := grpcServer.Serve(grpcListener); err != nil {
+			return fmt.Errorf("grpc server: %w", err)
 		}
 		return nil
 	})
@@ -107,9 +122,22 @@ func run(logger *slog.Logger) error {
 
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 		defer cancel()
-		// Stop accepting connections and wait for in-flight requests.
-		if err := httpServer.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("http shutdown: %w", err)
+
+		// Both servers stop accepting new work and wait for in-flight calls.
+		grpcStopped := make(chan struct{})
+		go func() {
+			grpcServer.GracefulStop()
+			close(grpcStopped)
+		}()
+		httpErr := httpServer.Shutdown(shutdownCtx)
+
+		select {
+		case <-grpcStopped:
+		case <-shutdownCtx.Done():
+			grpcServer.Stop() // timeout: close remaining connections
+		}
+		if httpErr != nil {
+			return fmt.Errorf("http shutdown: %w", httpErr)
 		}
 		return nil
 	})

@@ -346,3 +346,85 @@ and stop the service at start-up.
 **Why.** Environment variables work the same locally, in Docker Compose and
 in orchestrators, and keep secrets out of the repository. Failing at
 start-up is safer than discovering a bad setting on the first request.
+
+## 10. gRPC
+
+### D28. Contract and generated code
+
+**Decision.** The contract is `proto/user/v1/user.proto` (package `user.v1`)
+with `CreateUser` and `GetUser`. The generated Go code is committed under
+`gen/user/v1` and regenerated with `make proto`, using pinned plugin versions
+(`make tools`).
+
+**Why.** The version in the package name (`v1`) allows a future `v2` to live
+alongside it without breaking existing clients. Committing generated code
+means the project builds with only the Go toolchain; `protoc` is needed only
+when the contract changes.
+
+### D29. Same use cases and token as REST
+
+**Decision.** The gRPC server calls the same `UserService` as the HTTP
+handlers. Both methods require the metadata `authorization: Bearer <token>`,
+using the JWT from the REST login endpoint, just as `POST /api/v1/users`
+requires a token. Interceptors run in the order logging → panic recovery →
+authentication.
+
+**Why.** This is the payoff of the hexagonal structure: a second transport
+adds under 200 lines and no business logic. Validation lives in the domain,
+so gRPC requests are validated exactly like REST requests even though they
+never pass through Gin binding. A login RPC was left out because the
+requirements only ask for `CreateUser` and `GetUser`.
+
+### D30. Error mapping
+
+| Domain error | gRPC code |
+| --- | --- |
+| `ValidationError` | `INVALID_ARGUMENT` |
+| `ErrUserNotFound` | `NOT_FOUND` |
+| `ErrEmailAlreadyExists` | `ALREADY_EXISTS` |
+| Missing, malformed or invalid token | `UNAUTHENTICATED` |
+| Anything else | `INTERNAL` with a generic message; details are logged |
+
+### D31. Server reflection is on by default
+
+**Why.** It lets `grpcurl` and Postman discover the API without the `.proto`
+file, which makes the service easy to try.
+
+**Trade-off.** Reflection publishes the API surface to anyone who can reach
+the port. In production it would usually be disabled with
+`GRPC_REFLECTION=false`.
+
+### D32. gRPC shutdown
+
+**Decision.** On shutdown, `GracefulStop` (finish in-flight calls) runs in
+parallel with the HTTP server's `Shutdown`, both bounded by
+`SHUTDOWN_TIMEOUT`. If the timeout expires, `Stop` closes the remaining gRPC
+connections.
+
+## 11. Containers
+
+### D33. Docker image
+
+**Decision.** A multi-stage build compiles a static binary
+(`CGO_ENABLED=0`) in `golang:1.27-alpine` and copies it into
+`gcr.io/distroless/static-debian12:nonroot`.
+
+**Why.** The runtime image contains only the binary, with no shell or package
+manager, and runs as a non-root user. That keeps it small and reduces what an
+attacker could use if the process were compromised. Copying `go.mod` and
+`go.sum` before the source lets Docker cache the dependency download layer.
+
+**Trade-off.** Without a shell, the container cannot run `curl` for a Docker
+health check, and debugging inside it requires a debug image.
+
+### D34. Docker Compose
+
+**Decision.**
+
+- MongoDB has a health check, and the API starts only once it is healthy
+  (`depends_on: condition: service_healthy`).
+- `JWT_SECRET` is read from `.env` and Compose refuses to start without it.
+- `stop_grace_period` (15s) is longer than the service's shutdown timeout
+  (10s), so Docker does not kill the process while it is finishing requests.
+- MongoDB data lives in a named volume, and its port is published on
+  `127.0.0.1` only, for local tools and integration tests.

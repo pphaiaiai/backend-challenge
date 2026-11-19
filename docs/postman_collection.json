@@ -325,6 +325,38 @@
           ]
         },
         {
+          "name": "Get current user",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/users/me",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "v1",
+                "users",
+                "me"
+              ]
+            },
+            "description": "Returns the user the token belongs to."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200 OK\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"returns the logged-in user\", () => pm.expect(pm.response.json().id).to.eql(pm.collectionVariables.get(\"userId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "Update user",
           "request": {
             "method": "PATCH",
